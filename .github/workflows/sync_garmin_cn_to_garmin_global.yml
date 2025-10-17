@@ -3,23 +3,23 @@ name: Sync Garmin CN to Garmin Global
 on:
   workflow_dispatch:
   schedule:
-    # 主锚点（UTC）：23:18、00:18、01:18、02:18、09:18、13:18
-    # ↔ 北京时间：07:18、08:18、09:18、10:18、17:18、21:18
+    # 主锚点（UTC）：23:18、00:18、01:18、02:18、03:18、09:18、13:18
+    # ↔ 北京时间：07:18、08:18、09:18、10:18、11:18、17:18、21:18
     - cron: "18 23,0,1,2,3,9,13 * * *"
-    # 冗余锚点（UTC）：23:43、00:43、01:43、02:43、09:43、13:43
-    # ↔ 北京时间：07:43、08:43、09:43、10:43、17:43、21:43
+    # 冗余锚点（UTC）：23:43、00:43、01:43、02:43、03:43、09:43、13:43
+    # ↔ 北京时间：07:43、08:43、09:43、10:43、11:43、17:43、21:43
     - cron: "43 23,0,1,2,3,9,13 * * *"
   push:
     branches:
       - main
 
-# 避免重复运行（冗余触发或手动触发重叠）
+# 避免冗余触发/手动触发导致的并发
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
-  # 请替换为你自己的密钥配置
+  # 请替换为你自己的密钥配置（建议全部用 Secrets）
   RQ_COOKIE: ${{ secrets.RQ_COOKIE }}
   RQ_CSRF_TOKEN: ${{ secrets.RQ_CSRF_TOKEN }}
   RQ_USERID: ${{ secrets.RQ_USERID }}
@@ -46,23 +46,55 @@ jobs:
           node-version: '18'
           cache: 'yarn'
 
-      - name: 🕒 Print trigger & time info
+      - name: 🕒 Print trigger & time info (with drift calc)
+        shell: bash
         run: |
           echo "Trigger type: $GITHUB_EVENT_NAME"
           echo "Cron schedule: ${{ github.event.schedule || 'Manual / Push' }}"
           echo "UTC now:   $(date -u '+%Y-%m-%d %H:%M:%S %Z')"
-          echo "Beijing:   $(date '+%Y-%m-%d %H:%M:%S %Z')"
+          echo "Beijing:   $(date    '+%Y-%m-%d %H:%M:%S %Z')"
 
-          # 计算理论触发点（每两小时的第18分钟）
-          now=$(date -u +%s)
-          expected=$(( (now/7200)*7200 + 1080 ))  # 1080 秒 = 18 分钟
-          if [ "$expected" -gt "$now" ]; then expected=$(( expected - 7200 )); fi
-          drift=$(( now - expected ))
-          echo "Expected UTC trigger: $(date -u -d @${expected} '+%Y-%m-%d %H:%M:%S %Z')"
-          echo "Actual UTC start:     $(date -u '+%Y-%m-%d %H:%M:%S %Z')"
-          echo "⏱️ Drift: ${drift}s ($((drift/60)) min delay)"
-          if [ "$drift" -gt 1200 ]; then
-            echo "::warning::Trigger delayed >20min (${drift}s)"
+          # 仅在 schedule 触发时计算“理论触发点”
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            CRON="${{ github.event.schedule }}"
+            # 解析分钟与小时字段（只支持你当前这种：固定分钟 + 逗号分隔的小时列表）
+            MINUTE=$(awk '{print $1}' <<< "$CRON")
+            HOURS=$(awk '{print $2}' <<< "$CRON")
+
+            if [[ "$MINUTE" =~ ^[0-9]+$ ]] && [[ "$HOURS" =~ ^[0-9,]+$ ]]; then
+              now_ts=$(date -u +%s)
+              today=$(date -u +%Y-%m-%d)
+              expected_ts=0
+
+              # 遍历小时列表，生成候选时间（优先取今天；若晚于现在则回退到昨天）
+              for h in $(echo "$HOURS" | tr ',' ' '); do
+                ts=$(date -u -d "$today $(printf '%02d' $h):$(printf '%02d' $MINUTE):00" +%s)
+                if [ $ts -gt $now_ts ]; then
+                  ts=$(( ts - 86400 ))  # 回退一天
+                fi
+                # 取不晚于 now 的最大一个
+                if [ $ts -le $now_ts ] && { [ $expected_ts -eq 0 ] || [ $ts -gt $expected_ts ]; }; then
+                  expected_ts=$ts
+                fi
+              done
+
+              if [ $expected_ts -gt 0 ]; then
+                drift=$(( now_ts - expected_ts ))
+                echo "Expected UTC trigger: $(date -u -d @${expected_ts} '+%Y-%m-%d %H:%M:%S %Z')"
+                echo "Actual UTC start:     $(date -u '+%Y-%m-%d %H:%M:%S %Z')"
+                echo "⏱️ Drift: ${drift}s ($((drift/60)) min delay)"
+                # 超过 20 分钟给提示（可自己调阈值或删除）
+                if [ "$drift" -gt 1200 ]; then
+                  echo "::warning::Trigger delayed >20min (${drift}s)"
+                fi
+              else
+                echo "Could not compute expected trigger time (no candidate <= now)."
+              fi
+            else
+              echo "Cron pattern not supported by this drift calculator: $CRON"
+            fi
+          else
+            echo "Non-schedule trigger; skip drift calculation."
           fi
 
       - run: yarn
