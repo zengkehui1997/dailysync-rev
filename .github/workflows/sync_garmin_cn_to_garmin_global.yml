@@ -3,14 +3,23 @@ name: Sync Garmin CN to Garmin Global
 on:
   workflow_dispatch:
   schedule:
-    #  每2小时检查一次 每天08:12、10:12、12:12...触发
-    - cron: "12 */2 * * *"
+    # 主锚点（UTC）：23:18、00:18、01:18、02:18、09:18、13:18
+    # ↔ 北京时间：07:18、08:18、09:18、10:18、17:18、21:18
+    - cron: "18 23,0,1,2,9,13 * * *"
+    # 冗余锚点（UTC）：23:43、00:43、01:43、02:43、09:43、13:43
+    # ↔ 北京时间：07:43、08:43、09:43、10:43、17:43、21:43
+    - cron: "43 23,0,1,2,9,13 * * *"
   push:
     branches:
       - main
 
+# 避免重复运行（冗余触发或手动触发重叠）
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
-  # please change to your own config.
+  # 请替换为你自己的密钥配置
   RQ_COOKIE: ${{ secrets.RQ_COOKIE }}
   RQ_CSRF_TOKEN: ${{ secrets.RQ_CSRF_TOKEN }}
   RQ_USERID: ${{ secrets.RQ_USERID }}
@@ -31,13 +40,35 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v3
+
       - uses: actions/setup-node@v3
         with:
           node-version: '18'
           cache: 'yarn'
+
+      - name: 🕒 Print trigger & time info
+        run: |
+          echo "Trigger type: $GITHUB_EVENT_NAME"
+          echo "Cron schedule: ${{ github.event.schedule || 'Manual / Push' }}"
+          echo "UTC now:   $(date -u '+%Y-%m-%d %H:%M:%S %Z')"
+          echo "Beijing:   $(date '+%Y-%m-%d %H:%M:%S %Z')"
+
+          # 计算理论触发点（每两小时的第18分钟）
+          now=$(date -u +%s)
+          expected=$(( (now/7200)*7200 + 1080 ))  # 1080 秒 = 18 分钟
+          if [ "$expected" -gt "$now" ]; then expected=$(( expected - 7200 )); fi
+          drift=$(( now - expected ))
+          echo "Expected UTC trigger: $(date -u -d @${expected} '+%Y-%m-%d %H:%M:%S %Z')"
+          echo "Actual UTC start:     $(date -u '+%Y-%m-%d %H:%M:%S %Z')"
+          echo "⏱️ Drift: ${drift}s ($((drift/60)) min delay)"
+          if [ "$drift" -gt 1200 ]; then
+            echo "::warning::Trigger delayed >20min (${drift}s)"
+          fi
+
       - run: yarn
       - run: yarn sync_cn
         timeout-minutes: 5
+
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: Save Garmin Session
