@@ -356,7 +356,7 @@ garmin_fit_files/
 
 ## 12. 最短操作清单
 
-当 session 失效时，按这个顺序执行：
+1.当 session 失效时，按这个顺序执行：
 
 ```bash
 cd /d/dailysync-rev
@@ -381,3 +381,10 @@ yarn export_garmin_sessions
 4. 确认日志出现 login by env session
 ```
 
+
+
+2.或者直接运行编好的脚本进行同步生成
+```text
+bash run_sync_local.sh
+bash export_session_local.sh
+```
