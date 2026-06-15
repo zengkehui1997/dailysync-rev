@@ -5,10 +5,17 @@ on:
 
 env:
   BARK_KEY: ${{ secrets.BARK_KEY }}
+
   GARMIN_USERNAME: ${{ secrets.GARMIN_USERNAME }}
   GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
   GARMIN_GLOBAL_USERNAME: ${{ secrets.GARMIN_GLOBAL_USERNAME }}
   GARMIN_GLOBAL_PASSWORD: ${{ secrets.GARMIN_GLOBAL_PASSWORD }}
+
+  GARMIN_CN_OAUTH1: ${{ secrets.GARMIN_CN_OAUTH1 }}
+  GARMIN_CN_OAUTH2: ${{ secrets.GARMIN_CN_OAUTH2 }}
+  GARMIN_GLOBAL_OAUTH1: ${{ secrets.GARMIN_GLOBAL_OAUTH1 }}
+  GARMIN_GLOBAL_OAUTH2: ${{ secrets.GARMIN_GLOBAL_OAUTH2 }}
+
   GARMIN_MIGRATE_NUM: ${{ secrets.GARMIN_MIGRATE_NUM }}
   GARMIN_MIGRATE_START: ${{ secrets.GARMIN_MIGRATE_START }}
 
@@ -23,7 +30,7 @@ jobs:
     timeout-minutes: 40
 
     permissions:
-      contents: write
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
@@ -36,14 +43,13 @@ jobs:
       - name: Install dependencies
         run: yarn install --frozen-lockfile
 
+      - name: Check Garmin session secrets
+        run: |
+          test -n "$GARMIN_CN_OAUTH1" || (echo "GARMIN_CN_OAUTH1 is missing" && exit 1)
+          test -n "$GARMIN_CN_OAUTH2" || (echo "GARMIN_CN_OAUTH2 is missing" && exit 1)
+          test -n "$GARMIN_GLOBAL_OAUTH1" || (echo "GARMIN_GLOBAL_OAUTH1 is missing" && exit 1)
+          test -n "$GARMIN_GLOBAL_OAUTH2" || (echo "GARMIN_GLOBAL_OAUTH2 is missing" && exit 1)
+
       - name: Migrate Garmin CN to Garmin Global
         run: yarn migrate_garmin_cn_to_global
         timeout-minutes: 30
-
-      - name: Check changed files
-        run: git status --short
-
-      - name: Save Garmin Session
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: Save Garmin Session
