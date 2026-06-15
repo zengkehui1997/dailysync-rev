@@ -77,7 +77,8 @@ export const getGaminCNClient = async (): Promise<GarminClientType> => {
         return GCClient;
     } catch (err) {
         console.error(err);
-        core.setFailed(err);
+        core.setFailed(err instanceof Error ? err.message : String(err));
+        throw err;
     }
 };
 

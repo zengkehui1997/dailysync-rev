@@ -12,20 +12,38 @@ env:
   GARMIN_MIGRATE_NUM: ${{ secrets.GARMIN_MIGRATE_NUM }}
   GARMIN_MIGRATE_START: ${{ secrets.GARMIN_MIGRATE_START }}
 
+concurrency:
+  group: migrate-garmin-cn-to-global
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
     name: Migrate Garmin CN to Garmin Global
+    timeout-minutes: 40
+
     permissions:
       contents: write
+
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
-          node-version: '18'
-          cache: 'yarn'
-      - run: yarn
-      - run: yarn migrate_garmin_cn_to_global
-      - uses: stefanzweifel/git-auto-commit-action@v5
+          node-version: "18"
+          cache: "yarn"
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      - name: Migrate Garmin CN to Garmin Global
+        run: yarn migrate_garmin_cn_to_global
+        timeout-minutes: 30
+
+      - name: Check changed files
+        run: git status --short
+
+      - name: Save Garmin Session
+        uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: Save Garmin Session
